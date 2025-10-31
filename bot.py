@@ -5,7 +5,7 @@ Run this on PythonAnywhere or any Python hosting
 
 __all__ = [
     'get_or_create_user',
-    'get_active_subscription',
+    'get_active_subscription', 
     'create_btcpay_invoice',
     'save_payment',
     'SUPABASE_URL',
@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from supabase import create_client, Client
+
 
 # Configuration from environment variables
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -60,15 +61,14 @@ except Exception as e:
 # Database Helper Functions
 def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None):
     """Get user from database or create if doesn't exist"""
-    if supabase is None:
-        logger.error("Supabase not initialized, cannot get or create user")
-        return None
-
     try:
+        # Check if user exists
         result = supabase.table('users').select('*').eq('telegram_id', telegram_id).execute()
+        
         if result.data:
             return result.data[0]
-
+        
+        # Create new user
         new_user = {
             'telegram_id': telegram_id,
             'username': username,
@@ -83,19 +83,14 @@ def get_or_create_user(telegram_id: int, username: str = None, first_name: str =
 
 def get_active_subscription(telegram_id: int):
     """Check if user has active subscription"""
-    if supabase is None:
-        logger.error("Supabase not initialized, cannot check subscription")
-        return None
-
     try:
-        result = (
-            supabase.table('subscriptions')
-            .select('*')
-            .eq('user_id', telegram_id)
-            .eq('status', 'active')
-            .gte('end_date', datetime.now().isoformat())
+        result = supabase.table('subscriptions')\
+            .select('*')\
+            .eq('user_id', telegram_id)\
+            .eq('status', 'active')\
+            .gte('end_date', datetime.now().isoformat())\
             .execute()
-        )
+        
         if result.data:
             return result.data[0]
         return None
@@ -112,7 +107,7 @@ def create_btcpay_invoice(telegram_id: int, amount: float):
             'Authorization': f'token {BTCPAY_API_KEY}',
             'Content-Type': 'application/json'
         }
-
+        
         payload = {
             'amount': str(amount),
             'currency': 'USD',
@@ -124,13 +119,15 @@ def create_btcpay_invoice(telegram_id: int, amount: float):
             'checkout': {
                 'speedPolicy': 'HighSpeed',
                 'paymentMethods': ['BTC', 'BTC-LightningNetwork'],
-                'redirectURL': 'https://t.me/YOUR_BOT_USERNAME'
+                'redirectURL': f'https://t.me/YOUR_BOT_USERNAME'
             }
         }
-
+        
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
-        return response.json()
+        
+        invoice_data = response.json()
+        return invoice_data
     except Exception as e:
         logger.error(f"Error creating BTCPay invoice: {e}")
         return None
@@ -138,10 +135,6 @@ def create_btcpay_invoice(telegram_id: int, amount: float):
 
 def save_payment(telegram_id: int, invoice_data: dict):
     """Save payment to database"""
-    if supabase is None:
-        logger.error("Supabase not initialized, cannot save payment")
-        return None
-
     try:
         payment = {
             'user_id': telegram_id,
@@ -159,12 +152,16 @@ def save_payment(telegram_id: int, invoice_data: dict):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command"""
     user = update.effective_user
     telegram_id = user.id
-
+    
+    # Create or get user
     get_or_create_user(telegram_id, user.username, user.first_name)
+    
+    # Check if user has active subscription
     subscription = get_active_subscription(telegram_id)
-
+    
     if subscription:
         end_date = datetime.fromisoformat(subscription['end_date'])
         await update.message.reply_text(
@@ -188,6 +185,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /subscribe command"""
+    user = update.effective_user
+    
     await update.message.reply_text(
         f"💎 Premium Subscription\n\n"
         f"💰 Price: ${SUBSCRIPTION_PRICE}\n"
@@ -202,14 +202,16 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /status command"""
     user = update.effective_user
     telegram_id = user.id
-
+    
     subscription = get_active_subscription(telegram_id)
-
+    
     if subscription:
         end_date = datetime.fromisoformat(subscription['end_date'])
         days_left = (end_date - datetime.now()).days
+        
         await update.message.reply_text(
             f"📊 Subscription Status\n\n"
             f"✅ Status: Active\n"
@@ -226,28 +228,37 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle button clicks"""
     query = update.callback_query
     await query.answer()
-
+    
     user = query.from_user
     telegram_id = user.id
-
+    
     if query.data == 'create_invoice':
+        # Send "creating invoice" message
         await query.edit_message_text("⏳ Creating your payment invoice...")
-
+        
+        # Create BTCPay invoice
         invoice_data = create_btcpay_invoice(telegram_id, SUBSCRIPTION_PRICE)
+        
         if not invoice_data:
             await query.edit_message_text(
                 "❌ Error creating invoice. Please try again later or contact support."
             )
             return
-
+        
+        # Save to database
         save_payment(telegram_id, invoice_data)
-
+        
+        # Send invoice with QR code
         checkout_link = invoice_data['checkoutLink']
-        keyboard = [[InlineKeyboardButton("💳 Open Payment Page", url=checkout_link)]]
+        
+        keyboard = [
+            [InlineKeyboardButton("💳 Open Payment Page", url=checkout_link)]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-
+        
         await query.edit_message_text(
             f"✅ Invoice Created!\n\n"
             f"💰 Amount: ${SUBSCRIPTION_PRICE}\n"
@@ -256,28 +267,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"You'll receive a confirmation once payment is received!",
             reply_markup=reply_markup
         )
+        
         logger.info(f"Invoice created for user {telegram_id}: {invoice_data['id']}")
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Log errors"""
     logger.error(f"Update {update} caused error {context.error}")
 
 
 def main():
-    # 👇 THIS is the fix
-    application = (
-        Application.builder()
-        .token(TELEGRAM_BOT_TOKEN)
-        .updater(None)   # <---- prevent PTB from creating the legacy Updater
-        .build()
-    )
-
+    """Start the bot"""
+    # Create application
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("subscribe", subscribe))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_error_handler(error_handler)
-
+    
+    # Start bot
     logger.info("Bot started!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
