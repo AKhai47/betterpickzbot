@@ -5,6 +5,8 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
     envVars:
+      - key: PYTHON_VERSION      # 👈 add this
+        value: 3.11.9
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: SUPABASE_URL
