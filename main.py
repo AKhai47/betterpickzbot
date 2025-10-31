@@ -124,7 +124,7 @@ def btcpay_webhook():
         else:
             # Create new subscription
             end_date = now + timedelta(days=SUBSCRIPTION_DAYS)
-            subabase_request('POST', 'subscriptions', data={
+            supabase_request('POST', 'subscriptions', data={
                 'user_id': telegram_id,
                 'status': 'active',
                 'plan_type': 'monthly',

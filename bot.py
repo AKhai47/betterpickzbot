@@ -41,6 +41,13 @@ BTCPAY_STORE_ID = os.getenv('BTCPAY_STORE_ID')
 SUBSCRIPTION_PRICE = float(os.getenv('SUBSCRIPTION_PRICE', '10.00'))  # Default $10
 SUBSCRIPTION_DAYS = int(os.getenv('SUBSCRIPTION_DAYS', '30'))  # Default 30 days
 
+# Logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 # Initialize Supabase
 try:
     if SUPABASE_URL and SUPABASE_KEY:
@@ -51,15 +58,6 @@ try:
 except Exception as e:
     logger.error(f"Error initializing Supabase: {e}")
     supabase = None
-
-
-# Logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
 
 # Database Helper Functions
 def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None):
