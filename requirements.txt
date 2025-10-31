@@ -1,0 +1,7 @@
+python-telegram-bot==20.7
+supabase==2.7.4
+requests==2.31.0
+flask==3.0.0
+python-dotenv==1.0.0
+gotrue==2.4.4
+httpx==0.25.2

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: crypto-subscription-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: BTCPAY_URL
+        sync: false
+      - key: BTCPAY_API_KEY
+        sync: false
+      - key: BTCPAY_STORE_ID
+        sync: false
+      - key: SUBSCRIPTION_PRICE
+        value: 10.00
+      - key: SUBSCRIPTION_DAYS
+        value: 30
