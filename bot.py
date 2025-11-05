@@ -21,6 +21,8 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 from telegram.error import TelegramError
 import httpx
 from supabase import create_client, Client
+import qrcode
+from io import BytesIO
 
 # Configuration from environment variables
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -33,6 +35,17 @@ BTCPAY_WEBHOOK_SECRET = os.getenv('BTCPAY_WEBHOOK_SECRET')
 SUBSCRIPTION_PRICE = float(os.getenv('SUBSCRIPTION_PRICE', '10.00'))
 SUBSCRIPTION_DAYS = int(os.getenv('SUBSCRIPTION_DAYS', '30'))
 REDIS_URL = os.getenv('REDIS_URL', None)
+PROCESSING_FEE_PERCENT = float(os.getenv('PROCESSING_FEE_PERCENT', '5.0'))
+
+# Calculate total price with fee included
+def calculate_total_price():
+    """Calculate total subscription price with processing fee included"""
+    base_price = SUBSCRIPTION_PRICE
+    fee = round(base_price * (PROCESSING_FEE_PERCENT / 100), 2)
+    total = round(base_price + fee, 2)
+    return total
+
+TOTAL_SUBSCRIPTION_PRICE = calculate_total_price()
 
 # Security settings
 MAX_INVOICE_AGE_MINUTES = 15
@@ -289,7 +302,10 @@ async def create_btcpay_invoice(telegram_id: int, amount: float) -> Optional[Dic
     
     for attempt in range(max_retries):
         try:
-            url = f"{BTCPAY_URL}/api/v1/stores/{BTCPAY_STORE_ID}/invoices"
+            # Clean up URL to avoid duplication
+            base_url = BTCPAY_URL.rstrip('/').split('/stores/')[0]
+            url = f"{base_url}/api/v1/stores/{BTCPAY_STORE_ID}/invoices"
+            
             headers = {
                 'Authorization': f'token {BTCPAY_API_KEY}',
                 'Content-Type': 'application/json'
@@ -303,7 +319,10 @@ async def create_btcpay_invoice(telegram_id: int, amount: float) -> Optional[Dic
                 'metadata': {
                     'orderId': order_id,
                     'userId': str(telegram_id),
-                    'subscriptionDays': str(SUBSCRIPTION_DAYS)
+                    'subscriptionDays': str(SUBSCRIPTION_DAYS),
+                    'basePrice': str(SUBSCRIPTION_PRICE),
+                    'feePercent': str(PROCESSING_FEE_PERCENT),
+                    'totalPrice': str(amount)
                 },
                 'checkout': {
                     'speedPolicy': 'HighSpeed',
@@ -317,7 +336,7 @@ async def create_btcpay_invoice(telegram_id: int, amount: float) -> Optional[Dic
             response.raise_for_status()
             
             invoice_data = response.json()
-            logger.info(f"Invoice created: {invoice_data['id']} for user {telegram_id}")
+            logger.info(f"Invoice created: {invoice_data['id']} for user {telegram_id} - ${amount}")
             return invoice_data
             
         except httpx.HTTPStatusError as e:
@@ -451,6 +470,32 @@ def log_activity(user_id: int, action: str, details: Dict = None):
         logger.error(f"Error logging activity: {e}")
 
 
+def generate_qr_code(payment_url: str) -> Optional[BytesIO]:
+    """Generate QR code image for payment URL"""
+    try:
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(payment_url)
+        qr.make(fit=True)
+        
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        # Convert to bytes
+        bio = BytesIO()
+        bio.name = 'qr_code.png'
+        img.save(bio, 'PNG')
+        bio.seek(0)
+        
+        return bio
+    except Exception as e:
+        logger.error(f"Error generating QR code: {e}")
+        return None
+
+
 # ============================================================================
 # BOT COMMAND HANDLERS
 # ============================================================================
@@ -492,7 +537,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(
             f"👋 Welcome, {sanitize_string(user.first_name)}!\n\n"
-            f"💰 Plan: ${SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
+            f"💰 Plan: ${TOTAL_SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
             f"📊 Your status: {status_text}\n\n"
             f"Tap below to manage your subscription 👇",
             reply_markup=reply_markup,
@@ -501,7 +546,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(
             f"👋 Welcome, {sanitize_string(user.first_name)}!\n\n"
-            f"💰 Plan: ${SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
+            f"💰 Plan: ${TOTAL_SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
             f"📊 Your status: ❌ Not active\n\n"
             f"Tap below to manage your subscription 👇",
             reply_markup=reply_markup,
@@ -534,7 +579,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             f"💎 <b>Premium Subscription</b>\n\n"
-            f"💰 Price: ${SUBSCRIPTION_PRICE:.2f}\n"
+            f"💰 Price: ${TOTAL_SUBSCRIPTION_PRICE:.2f}\n"
             f"⏱ Duration: {SUBSCRIPTION_DAYS} days\n"
             f"⚡️ Payment: Bitcoin or Lightning Network\n\n"
             f"✨ <b>What you get:</b>\n"
@@ -576,7 +621,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 f"📊 <b>Subscription Status</b>\n\n"
                 f"❌ Status: <b>Inactive</b>\n"
-                f"💰 Price: ${SUBSCRIPTION_PRICE:.2f}/{SUBSCRIPTION_DAYS}d\n\n"
+                f"💰 Price: ${TOTAL_SUBSCRIPTION_PRICE:.2f}/{SUBSCRIPTION_DAYS}d\n\n"
                 f"Tap Subscribe to get started!",
                 reply_markup=reply_markup,
                 parse_mode='HTML'
@@ -591,7 +636,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             f"💰 <b>Subscription Plans</b>\n\n"
             f"<b>Monthly Plan:</b>\n"
-            f"💵 ${SUBSCRIPTION_PRICE:.2f} for {SUBSCRIPTION_DAYS} days\n\n"
+            f"💵 ${TOTAL_SUBSCRIPTION_PRICE:.2f} for {SUBSCRIPTION_DAYS} days\n\n"
             f"✨ <b>What's included:</b>\n"
             f"• Full access to premium picks\n"
             f"• Daily predictions & analysis\n"
@@ -675,7 +720,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await query.edit_message_text(
                 f"👋 Welcome back!\n\n"
-                f"💰 Plan: ${SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
+                f"💰 Plan: ${TOTAL_SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
                 f"📊 Your status: {status_text}\n\n"
                 f"Tap below to manage your subscription 👇",
                 reply_markup=reply_markup,
@@ -684,7 +729,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text(
                 f"👋 Welcome!\n\n"
-                f"💰 Plan: ${SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
+                f"💰 Plan: ${TOTAL_SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
                 f"📊 Your status: ❌ Not active\n\n"
                 f"Tap below to manage your subscription 👇",
                 reply_markup=reply_markup,
@@ -702,7 +747,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         try:
-            invoice_data = await create_btcpay_invoice(telegram_id, SUBSCRIPTION_PRICE)
+            invoice_data = await create_btcpay_invoice(telegram_id, TOTAL_SUBSCRIPTION_PRICE)
             
             if not invoice_data:
                 keyboard = [[InlineKeyboardButton("« Back", callback_data='menu_subscribe')]]
@@ -731,27 +776,65 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             checkout_link = invoice_data['checkoutLink']
             
-            keyboard = [
-                [InlineKeyboardButton("💳 Pay Now", url=checkout_link)],
-                [InlineKeyboardButton("« Back to Menu", callback_data='back_to_menu')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            # Generate QR code
+            qr_image = generate_qr_code(checkout_link)
             
-            await query.edit_message_text(
-                f"✅ <b>Invoice Created!</b>\n\n"
-                f"💰 Amount: ${SUBSCRIPTION_PRICE:.2f}\n"
-                f"⏱ Valid for: {MAX_INVOICE_AGE_MINUTES} minutes\n"
-                f"⚡️ Payment: BTC or Lightning\n\n"
-                f"Click <b>Pay Now</b> to open the payment page.\n"
-                f"You'll receive confirmation automatically! 🎉\n\n"
-                f"<i>Invoice ID: {invoice_data['id'][:8]}...</i>",
-                reply_markup=reply_markup,
-                parse_mode='HTML'
-            )
+            # Send QR code as photo
+            if qr_image:
+                # First, delete the loading message
+                try:
+                    await query.message.delete()
+                except:
+                    pass  # Message might already be deleted
+                
+                # Send the QR code image
+                keyboard = [
+                    [InlineKeyboardButton("💳 Open in Browser", url=checkout_link)],
+                    [InlineKeyboardButton("« Back to Menu", callback_data='back_to_menu')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                caption = (
+                    f"✅ <b>Invoice Created!</b>\n\n"
+                    f"💰 Amount: ${TOTAL_SUBSCRIPTION_PRICE:.2f}\n"
+                    f"⏱ Valid for: {MAX_INVOICE_AGE_MINUTES} minutes\n"
+                    f"⚡️ Payment: BTC or Lightning\n\n"
+                    f"📱 <b>Scan QR code above with your wallet</b>\n"
+                    f"Or click 'Open in Browser' to pay\n\n"
+                    f"You'll receive confirmation automatically! 🎉\n\n"
+                    f"<i>Invoice ID: {invoice_data['id'][:8]}...</i>"
+                )
+                
+                await context.bot.send_photo(
+                    chat_id=telegram_id,
+                    photo=qr_image,
+                    caption=caption,
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
+                )
+            else:
+                # Fallback if QR generation fails - use old method
+                keyboard = [
+                    [InlineKeyboardButton("💳 Pay Now", url=checkout_link)],
+                    [InlineKeyboardButton("« Back to Menu", callback_data='back_to_menu')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    f"✅ <b>Invoice Created!</b>\n\n"
+                    f"💰 Amount: ${TOTAL_SUBSCRIPTION_PRICE:.2f}\n"
+                    f"⏱ Valid for: {MAX_INVOICE_AGE_MINUTES} minutes\n"
+                    f"⚡️ Payment: BTC or Lightning\n\n"
+                    f"Click <b>Pay Now</b> to open the payment page.\n"
+                    f"You'll receive confirmation automatically! 🎉\n\n"
+                    f"<i>Invoice ID: {invoice_data['id'][:8]}...</i>",
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
+                )
             
             log_activity(telegram_id, 'invoice_created', {
                 'invoice_id': invoice_data['id'],
-                'amount': SUBSCRIPTION_PRICE
+                'amount': TOTAL_SUBSCRIPTION_PRICE
             })
             
         except Exception as e:
