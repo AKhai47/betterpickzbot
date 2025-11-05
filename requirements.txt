@@ -3,7 +3,7 @@ python-telegram-bot==20.7
 supabase==2.7.4
 python-dotenv==1.0.0
 
-# HTTP client with connection pooling
+# HTTP client
 httpx==0.25.2
 requests==2.31.0
 
@@ -11,17 +11,21 @@ requests==2.31.0
 flask==3.0.0
 flask-cors==4.0.0
 flask-limiter==3.5.0
-waitress==3.0.0  # Production WSGI server
+waitress==3.0.0
 
 # Database
 gotrue==2.4.4
 
-# Caching (optional but recommended)
+# Caching
 redis==5.0.1
-hiredis==2.3.2  # C parser for Redis (performance)
+hiredis==2.3.2
 
 # Security
 cryptography==41.0.7
+
+# QR Code generation
+qrcode==7.4.2
+Pillow==10.1.0
 
 # Utilities
 python-dateutil==2.8.2
