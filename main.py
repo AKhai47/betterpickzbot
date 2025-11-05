@@ -452,7 +452,7 @@ def run_flask():
 
 def run_bot():
     """Run Telegram bot"""
-    from bot_secure import main as bot_main
+    from bot import main as bot_main
     logger.info("Starting Telegram bot")
     bot_main()
 
