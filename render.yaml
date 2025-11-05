@@ -1,25 +1,76 @@
 services:
+  # Main web service
   - type: web
-    name: crypto-subscription-bot
+    name: crypto-subscription-bot-secure
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    plan: starter  # Upgrade to standard for better performance
+    buildCommand: pip install -r requirements_secure.txt
+    startCommand: python main_secure.py
+    
+    # Health check configuration
+    healthCheckPath: /health
+    
+    # Environment variables
     envVars:
-      - key: PYTHON_VERSION      # 👈 add this
+      - key: PYTHON_VERSION
         value: 3.11.9
+      
+      - key: FLASK_ENV
+        value: production
+      
+      # Telegram
       - key: TELEGRAM_BOT_TOKEN
         sync: false
+      
+      - key: BOT_USERNAME
+        sync: false
+      
+      # Supabase
       - key: SUPABASE_URL
         sync: false
+      
       - key: SUPABASE_KEY
         sync: false
+      
+      # BTCPay Server
       - key: BTCPAY_URL
         sync: false
+      
       - key: BTCPAY_API_KEY
         sync: false
+      
       - key: BTCPAY_STORE_ID
         sync: false
+      
+      # CRITICAL: Set this for security!
+      - key: BTCPAY_WEBHOOK_SECRET
+        sync: false
+        generateValue: true  # Auto-generate if not set
+      
+      # Subscription settings
       - key: SUBSCRIPTION_PRICE
         value: 10.00
+      
       - key: SUBSCRIPTION_DAYS
         value: 30
+      
+      # Redis connection (linked to redis service below)
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: subscription-bot-cache
+          property: connectionString
+
+  # Redis cache service (RECOMMENDED for production)
+  - type: redis
+    name: subscription-bot-cache
+    plan: starter  # Free tier available
+    maxmemoryPolicy: allkeys-lru  # Evict least recently used keys when full
+    ipAllowList: []  # Empty = allow from any Render service
+
+# Optional: Add cron jobs for cleanup
+# - type: cron
+#   name: cleanup-old-logs
+#   schedule: "0 0 * * *"  # Daily at midnight
+#   buildCommand: pip install -r requirements_secure.txt
+#   startCommand: python scripts/cleanup.py

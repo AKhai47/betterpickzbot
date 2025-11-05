@@ -1,5 +1,9 @@
 # Environment variables (contains secrets)
 .env
+*.env
+.env.local
+.env.*.local
+.env.backup
 
 # Python cache files
 __pycache__/
@@ -12,6 +16,7 @@ __pycache__/
 venv/
 env/
 ENV/
+.venv
 
 # IDE files
 .vscode/
@@ -23,10 +28,18 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Logs
+# Log files
 *.log
+bot.log
+bot_secure.log
+webhook_secure.log
 
-# Database files (if any)
+# Database files
 *.db
 *.sqlite
 *.sqlite3
+
+# Backup folders
+backups/
+old_files/
+setup/

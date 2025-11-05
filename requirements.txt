@@ -1,7 +1,27 @@
+# Core dependencies
 python-telegram-bot==20.7
 supabase==2.7.4
-requests==2.31.0
-flask==3.0.0
 python-dotenv==1.0.0
-gotrue==2.4.4
+
+# HTTP client with connection pooling
 httpx==0.25.2
+requests==2.31.0
+
+# Flask and security
+flask==3.0.0
+flask-cors==4.0.0
+flask-limiter==3.5.0
+waitress==3.0.0  # Production WSGI server
+
+# Database
+gotrue==2.4.4
+
+# Caching (optional but recommended)
+redis==5.0.1
+hiredis==2.3.2  # C parser for Redis (performance)
+
+# Security
+cryptography==41.0.7
+
+# Utilities
+python-dateutil==2.8.2
