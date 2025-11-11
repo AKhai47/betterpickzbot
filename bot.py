@@ -713,28 +713,62 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        if subscription:
-            end_date = datetime.fromisoformat(subscription['end_date'])
-            days_left = (end_date - datetime.now()).days
-            status_text = "✅ Active" if days_left > 0 else "❌ Expired"
+        # Check if message has photo (QR code)
+        if query.message.photo:
+            # Delete photo message, send new text message
+            try:
+                await query.message.delete()
+            except:
+                pass
             
-            await query.edit_message_text(
-                f"👋 Welcome back!\n\n"
-                f"💰 Plan: ${TOTAL_SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
-                f"📊 Your status: {status_text}\n\n"
-                f"Tap below to manage your subscription 👇",
-                reply_markup=reply_markup,
-                parse_mode='HTML'
-            )
+            if subscription:
+                end_date = datetime.fromisoformat(subscription['end_date'])
+                days_left = (end_date - datetime.now()).days
+                status_text = "✅ Active" if days_left > 0 else "❌ Expired"
+                
+                await context.bot.send_message(
+                    chat_id=telegram_id,
+                    text=f"👋 Welcome back!\n\n"
+                         f"💰 Plan: ${TOTAL_SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
+                         f"📊 Your status: {status_text}\n\n"
+                         f"Tap below to manage your subscription 👇",
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=telegram_id,
+                    text=f"👋 Welcome!\n\n"
+                         f"💰 Plan: ${TOTAL_SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
+                         f"📊 Your status: ❌ Not active\n\n"
+                         f"Tap below to manage your subscription 👇",
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
+                )
         else:
-            await query.edit_message_text(
-                f"👋 Welcome!\n\n"
-                f"💰 Plan: ${TOTAL_SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
-                f"📊 Your status: ❌ Not active\n\n"
-                f"Tap below to manage your subscription 👇",
-                reply_markup=reply_markup,
-                parse_mode='HTML'
-            )
+            # Normal text message, can edit
+            if subscription:
+                end_date = datetime.fromisoformat(subscription['end_date'])
+                days_left = (end_date - datetime.now()).days
+                status_text = "✅ Active" if days_left > 0 else "❌ Expired"
+                
+                await query.edit_message_text(
+                    f"👋 Welcome back!\n\n"
+                    f"💰 Plan: ${TOTAL_SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
+                    f"📊 Your status: {status_text}\n\n"
+                    f"Tap below to manage your subscription 👇",
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
+                )
+            else:
+                await query.edit_message_text(
+                    f"👋 Welcome!\n\n"
+                    f"💰 Plan: ${TOTAL_SUBSCRIPTION_PRICE:.2f} / {SUBSCRIPTION_DAYS} days\n"
+                    f"📊 Your status: ❌ Not active\n\n"
+                    f"Tap below to manage your subscription 👇",
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
+                )
         return
     
     # Renew subscription (from reminder button)
