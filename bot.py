@@ -737,6 +737,107 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
     
+    # Renew subscription (from reminder button)
+    if query.data == 'renew_subscription':
+        # Same flow as create_invoice
+        await query.edit_message_text(
+            "⏳ <b>Creating your renewal invoice...</b>\n\n"
+            "One moment! ⚡",
+            parse_mode='HTML'
+        )
+        
+        try:
+            invoice_data = await create_btcpay_invoice(telegram_id, TOTAL_SUBSCRIPTION_PRICE)
+            
+            if not invoice_data:
+                keyboard = [[InlineKeyboardButton("« Back", callback_data='back_to_menu')]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    "❌ Unable to create invoice right now.\n"
+                    "Please try again in a few moments or contact support.",
+                    reply_markup=reply_markup
+                )
+                log_activity(telegram_id, 'renewal_invoice_failed')
+                return
+            
+            payment = save_payment(telegram_id, invoice_data)
+            
+            if not payment:
+                keyboard = [[InlineKeyboardButton("« Back", callback_data='back_to_menu')]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    "❌ Error processing request.\n"
+                    "Please try again or contact support.",
+                    reply_markup=reply_markup
+                )
+                return
+            
+            checkout_link = invoice_data['checkoutLink']
+            qr_image = generate_qr_code(checkout_link)
+            
+            if qr_image:
+                try:
+                    await query.message.delete()
+                except:
+                    pass
+                
+                keyboard = [
+                    [InlineKeyboardButton("💳 Open in Browser", url=checkout_link)],
+                    [InlineKeyboardButton("« Back to Menu", callback_data='back_to_menu')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                caption = (
+                    f"✅ <b>Renewal Invoice Created!</b>\n\n"
+                    f"💰 Amount: ${TOTAL_SUBSCRIPTION_PRICE:.2f}\n"
+                    f"⏱ Valid for: {MAX_INVOICE_AGE_MINUTES} minutes\n"
+                    f"⚡️ Payment: BTC or Lightning\n\n"
+                    f"📱 <b>Scan QR code above with your wallet</b>\n"
+                    f"Or click 'Open in Browser' to pay\n\n"
+                    f"Your subscription will extend automatically! 🎉\n\n"
+                    f"<i>Invoice ID: {invoice_data['id'][:8]}...</i>"
+                )
+                
+                await context.bot.send_photo(
+                    chat_id=telegram_id,
+                    photo=qr_image,
+                    caption=caption,
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
+                )
+            else:
+                keyboard = [
+                    [InlineKeyboardButton("💳 Pay Now", url=checkout_link)],
+                    [InlineKeyboardButton("« Back to Menu", callback_data='back_to_menu')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(
+                    f"✅ <b>Renewal Invoice Created!</b>\n\n"
+                    f"💰 Amount: ${TOTAL_SUBSCRIPTION_PRICE:.2f}\n"
+                    f"⏱ Valid for: {MAX_INVOICE_AGE_MINUTES} minutes\n"
+                    f"⚡️ Payment: BTC or Lightning\n\n"
+                    f"Click <b>Pay Now</b> to open the payment page.\n"
+                    f"Your subscription will extend automatically! 🎉\n\n"
+                    f"<i>Invoice ID: {invoice_data['id'][:8]}...</i>",
+                    reply_markup=reply_markup,
+                    parse_mode='HTML'
+                )
+            
+            log_activity(telegram_id, 'renewal_invoice_created', {
+                'invoice_id': invoice_data['id'],
+                'amount': TOTAL_SUBSCRIPTION_PRICE
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in renew_subscription: {e}", exc_info=True)
+            await query.edit_message_text(
+                "❌ An error occurred. Please try again later."
+            )
+        return
+    
     # Create invoice
     if query.data == 'create_invoice':
         # Show loading immediately with encouraging message
