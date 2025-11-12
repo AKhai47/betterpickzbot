@@ -362,6 +362,17 @@ def btcpay_webhook():
             
             return jsonify({'status': 'error', 'reason': 'subscription_failed'}), 500
         
+        # Link payment to subscription
+        try:
+            supabase_query('payments', method='PATCH',
+                filters={'eq_id': payment['id']},
+                data={'subscription_id': subscription['id']}
+            )
+            logger.info(f"Linked payment {payment['id']} to subscription {subscription['id']}")
+        except Exception as e:
+            logger.warning(f"Failed to link payment to subscription: {e}")
+            # Non-critical error, continue
+        
         # Get end date
         end_date = datetime.fromisoformat(subscription['end_date'])
         
@@ -393,6 +404,38 @@ def btcpay_webhook():
             'event_type': event_type,
             'overpayment': overpayment if overpayment > 0.01 else 0
         })
+        
+        # Send private channel invite via edge function (non-blocking)
+        try:
+            edge_function_url = f"{SUPABASE_URL}/functions/v1/deliver-invite"
+            edge_function_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY') or SUPABASE_KEY
+            
+            # Call edge function asynchronously (don't block webhook response)
+            def send_invite_async():
+                try:
+                    response = requests.post(
+                        edge_function_url,
+                        json={'invoiceId': invoice_id},
+                        headers={
+                            'Authorization': f'Bearer {edge_function_key}',
+                            'Content-Type': 'application/json'
+                        },
+                        timeout=10
+                    )
+                    if response.ok:
+                        logger.info(f"✅ Invite sent for invoice {invoice_id}")
+                    else:
+                        logger.warning(f"⚠️ Invite function returned {response.status_code}: {response.text}")
+                except Exception as e:
+                    logger.error(f"Error calling deliver-invite function: {e}")
+            
+            # Run in background thread (non-blocking)
+            invite_thread = threading.Thread(target=send_invite_async, daemon=True)
+            invite_thread.start()
+            
+        except Exception as e:
+            logger.warning(f"Failed to trigger invite delivery: {e}")
+            # Non-critical error, don't fail the webhook
         
         logger.info(f"✅ Webhook processed successfully: {invoice_id} for user {telegram_id}")
         

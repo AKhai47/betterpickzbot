@@ -32,6 +32,10 @@ services:
       - key: SUPABASE_KEY
         sync: false
       
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+        description: "Service role key for edge functions (required for deliver-invite)"
+      
       # BTCPay Server
       - key: BTCPAY_URL
         sync: false
@@ -53,6 +57,11 @@ services:
       
       - key: SUBSCRIPTION_DAYS
         value: 30
+      
+      # Private channel for premium subscribers
+      - key: PAID_CHAT_ID
+        sync: false
+        description: "Telegram channel/group ID for premium subscribers (e.g., -1001234567890)"
       
       # Redis connection (linked to redis service below)
       - key: REDIS_URL
