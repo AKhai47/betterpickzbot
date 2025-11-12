@@ -2,6 +2,7 @@
 Secured Combined Telegram Bot + Webhook Server
 Enhanced with security, validation, idempotency, and optimization
 Runs on Render.com
+VERSION 2.1 - Added strict payment amount verification
 """
 
 import os
@@ -42,6 +43,7 @@ from bot import (
     BTCPAY_WEBHOOK_SECRET,
     SUBSCRIPTION_PRICE,
     SUBSCRIPTION_DAYS,
+    TOTAL_SUBSCRIPTION_PRICE,
     supabase,
     cache
 )
@@ -194,6 +196,7 @@ def btcpay_webhook():
     - HMAC signature verification
     - Idempotency (prevent duplicate processing)
     - Input validation
+    - STRICT AMOUNT VERIFICATION (prevents underpayments)
     - Rate limiting
     - Comprehensive error handling
     """
@@ -258,7 +261,69 @@ def btcpay_webhook():
             logger.error(f"Invalid payment amount: {amount}")
             abort(400, "Invalid amount")
         
-        # Mark webhook as processed BEFORE making changes
+        # ========================================================================
+        # CRITICAL SECURITY CHECK: Verify amount meets subscription price
+        # This prevents underpayments from activating subscriptions
+        # ========================================================================
+        if amount < TOTAL_SUBSCRIPTION_PRICE:
+            logger.warning(
+                f"🚨 INSUFFICIENT PAYMENT BLOCKED: "
+                f"User {telegram_id} paid ${amount:.2f} but needs ${TOTAL_SUBSCRIPTION_PRICE:.2f}"
+            )
+            
+            # Mark as processed to prevent retry
+            mark_webhook_processed(invoice_id)
+            
+            # Update payment status to insufficient
+            supabase_query('payments', method='PATCH',
+                filters={'eq_id': payment['id']},
+                data={
+                    'status': 'insufficient_amount',
+                    'paid_at': datetime.now().isoformat(),
+                    'webhook_received_at': datetime.now().isoformat()
+                }
+            )
+            
+            # Notify user about insufficient payment
+            difference = TOTAL_SUBSCRIPTION_PRICE - amount
+            send_telegram_message(
+                telegram_id,
+                f"⚠️ <b>Payment Received - Insufficient Amount</b>\n\n"
+                f"💰 Amount received: <b>${amount:.2f}</b>\n"
+                f"💵 Required amount: <b>${TOTAL_SUBSCRIPTION_PRICE:.2f}</b>\n"
+                f"📉 Short by: <b>${difference:.2f}</b>\n\n"
+                f"❌ <b>Your subscription was NOT activated.</b>\n\n"
+                f"To resolve this:\n"
+                f"1️⃣ Contact support for a refund\n"
+                f"2️⃣ Or pay the remaining ${difference:.2f}\n\n"
+                f"📧 Support: @betterpickz_support\n\n"
+                f"<i>Invoice ID: {invoice_id[:12]}...</i>"
+            )
+            
+            # Log the insufficient payment
+            log_activity(telegram_id, 'payment_insufficient', {
+                'invoice_id': invoice_id,
+                'amount_paid': amount,
+                'amount_required': TOTAL_SUBSCRIPTION_PRICE,
+                'difference': difference
+            })
+            
+            # Return error - NO SUBSCRIPTION WILL BE CREATED
+            return jsonify({
+                'status': 'error',
+                'reason': 'insufficient_amount',
+                'amount_paid': amount,
+                'amount_required': TOTAL_SUBSCRIPTION_PRICE,
+                'message': 'Payment amount is less than subscription price'
+            }), 400
+        
+        # ========================================================================
+        # Amount is sufficient - proceed with subscription activation
+        # ========================================================================
+        
+        logger.info(f"✅ Payment verified: ${amount:.2f} >= ${TOTAL_SUBSCRIPTION_PRICE:.2f}")
+        
+        # Mark webhook as processed
         mark_webhook_processed(invoice_id)
         
         # Update payment status
@@ -300,13 +365,19 @@ def btcpay_webhook():
         # Get end date
         end_date = datetime.fromisoformat(subscription['end_date'])
         
+        # Determine if this was an overpayment
+        overpayment = amount - TOTAL_SUBSCRIPTION_PRICE
+        overpayment_text = ""
+        if overpayment > 0.01:  # More than 1 cent overpaid
+            overpayment_text = f"\n\n💝 <b>Overpayment:</b> ${overpayment:.2f}\nThank you for your generosity!"
+        
         # Send confirmation to user
         success = send_telegram_message(
             telegram_id,
             f"✅ <b>Payment Confirmed!</b>\n\n"
             f"🎉 Your premium subscription is now active!\n\n"
             f"📅 Valid until: {end_date.strftime('%B %d, %Y')}\n"
-            f"💰 Amount: ${amount:.2f}\n\n"
+            f"💰 Amount paid: ${amount:.2f}{overpayment_text}\n\n"
             f"Thank you for subscribing! Enjoy your premium access! 🚀\n\n"
             f"Use /status to check your subscription anytime."
         )
@@ -319,15 +390,17 @@ def btcpay_webhook():
             'invoice_id': invoice_id,
             'amount': amount,
             'end_date': end_date.isoformat(),
-            'event_type': event_type
+            'event_type': event_type,
+            'overpayment': overpayment if overpayment > 0.01 else 0
         })
         
-        logger.info(f"Webhook processed successfully: {invoice_id} for user {telegram_id}")
+        logger.info(f"✅ Webhook processed successfully: {invoice_id} for user {telegram_id}")
         
         return jsonify({
             'status': 'success',
             'invoice_id': invoice_id,
-            'user_id': telegram_id
+            'user_id': telegram_id,
+            'subscription_active': True
         }), 200
         
     except Exception as e:
@@ -350,7 +423,12 @@ def health():
         'status': 'ok',
         'timestamp': datetime.now().isoformat(),
         'service': 'telegram-subscription-bot',
-        'version': '2.0.0'
+        'version': '2.1.0',
+        'security': {
+            'amount_verification': 'enabled',
+            'webhook_signature': 'enabled' if BTCPAY_WEBHOOK_SECRET else 'disabled',
+            'rate_limiting': 'enabled' if cache else 'fallback'
+        }
     }
     
     # Check Supabase connectivity
@@ -494,11 +572,12 @@ def main():
         logger.warning("⚠️  Redis not configured - rate limiting and caching will use fallbacks")
     
     logger.info("=" * 60)
-    logger.info("🚀 Starting Secured Telegram Subscription Bot")
+    logger.info("🚀 Starting Secured Telegram Subscription Bot v2.1")
     logger.info("=" * 60)
     logger.info(f"Environment: {os.getenv('FLASK_ENV', 'production')}")
-    logger.info(f"Subscription: ${SUBSCRIPTION_PRICE} for {SUBSCRIPTION_DAYS} days")
+    logger.info(f"Subscription: ${SUBSCRIPTION_PRICE} + fee = ${TOTAL_SUBSCRIPTION_PRICE} for {SUBSCRIPTION_DAYS} days")
     logger.info(f"Security features:")
+    logger.info(f"  - Amount verification: ✅ ENABLED (STRICT)")
     logger.info(f"  - Webhook verification: {'✅ Enabled' if BTCPAY_WEBHOOK_SECRET else '❌ Disabled'}")
     logger.info(f"  - Rate limiting: {'✅ Enabled' if cache else '⚠️  Fallback mode'}")
     logger.info(f"  - Input validation: ✅ Enabled")
