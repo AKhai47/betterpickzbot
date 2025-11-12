@@ -4,8 +4,8 @@ services:
     name: crypto-subscription-bot-secure
     env: python
     plan: starter  # Upgrade to standard for better performance
-    buildCommand: pip install -r requirements_secure.txt
-    startCommand: python main_secure.py
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
     
     # Health check configuration
     healthCheckPath: /health
