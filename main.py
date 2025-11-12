@@ -116,9 +116,17 @@ def mark_webhook_processed(invoice_id: str):
     if len(processed_webhooks) > WEBHOOK_CACHE_SIZE:
         processed_webhooks.pop()
 
+# Allowed table names for security (whitelist)
+ALLOWED_TABLES = {'users', 'subscriptions', 'payments', 'activity_logs'}
+
 # Supabase helper with proper error handling
 def supabase_query(table: str, method: str = 'GET', filters: Dict = None, data: Dict = None) -> Optional[list]:
     """Execute Supabase query with error handling"""
+    # Security: Whitelist table names to prevent unauthorized access
+    if table not in ALLOWED_TABLES:
+        logger.error(f"Attempted access to unauthorized table: {table}")
+        return None
+    
     try:
         query = supabase.table(table)
         
@@ -201,12 +209,15 @@ def btcpay_webhook():
     - Comprehensive error handling
     """
     try:
-        # Verify webhook signature
+        # CRITICAL: Verify webhook signature (mandatory for security)
+        if not BTCPAY_WEBHOOK_SECRET:
+            logger.critical("BTCPAY_WEBHOOK_SECRET not configured - rejecting webhook for security")
+            abort(503, "Service configuration error")
+        
         signature = request.headers.get('BTCPay-Sig', '')
-        if BTCPAY_WEBHOOK_SECRET:
-            if not verify_btcpay_webhook(request.data, signature):
-                logger.warning(f"Invalid webhook signature from {request.remote_addr}")
-                abort(401, "Invalid signature")
+        if not verify_btcpay_webhook(request.data, signature):
+            logger.warning(f"Invalid webhook signature from {request.remote_addr}")
+            abort(401, "Invalid signature")
         
         webhook_data = request.get_json(force=True)
         
@@ -244,7 +255,7 @@ def btcpay_webhook():
         })
         
         if not payments:
-            logger.error(f"Payment not found for invoice: {invoice_id}")
+            logger.error(f"Payment not found for invoice: {invoice_id[:12]}...")
             abort(404, "Payment not found")
         
         payment = payments[0]
@@ -252,13 +263,13 @@ def btcpay_webhook():
         
         # Validate telegram_id
         if not validate_telegram_id(telegram_id):
-            logger.error(f"Invalid telegram_id in payment: {telegram_id}")
+            logger.error(f"Invalid telegram_id in payment record")
             abort(400, "Invalid user ID")
         
         # Validate amount
         amount = payment.get('amount', 0)
         if not validate_amount(amount):
-            logger.error(f"Invalid payment amount: {amount}")
+            logger.error(f"Invalid payment amount in payment record")
             abort(400, "Invalid amount")
         
         # ========================================================================
@@ -268,7 +279,7 @@ def btcpay_webhook():
         if amount < TOTAL_SUBSCRIPTION_PRICE:
             logger.warning(
                 f"🚨 INSUFFICIENT PAYMENT BLOCKED: "
-                f"User {telegram_id} paid ${amount:.2f} but needs ${TOTAL_SUBSCRIPTION_PRICE:.2f}"
+                f"User paid ${amount:.2f} but needs ${TOTAL_SUBSCRIPTION_PRICE:.2f} (invoice: {invoice_id[:12]}...)"
             )
             
             # Mark as processed to prevent retry
@@ -321,7 +332,7 @@ def btcpay_webhook():
         # Amount is sufficient - proceed with subscription activation
         # ========================================================================
         
-        logger.info(f"✅ Payment verified: ${amount:.2f} >= ${TOTAL_SUBSCRIPTION_PRICE:.2f}")
+        logger.info(f"✅ Payment verified: ${amount:.2f} >= ${TOTAL_SUBSCRIPTION_PRICE:.2f} (invoice: {invoice_id[:12]}...)")
         
         # Mark webhook as processed
         mark_webhook_processed(invoice_id)
@@ -337,14 +348,14 @@ def btcpay_webhook():
         )
         
         if not update_result:
-            logger.error(f"Failed to update payment status: {invoice_id}")
+            logger.error(f"Failed to update payment status (invoice: {invoice_id[:12]}...)")
             # Don't abort - payment was processed, just log the error
         
         # Create or extend subscription
         subscription = create_or_extend_subscription(telegram_id, amount, invoice_id)
         
         if not subscription:
-            logger.error(f"Failed to create/extend subscription for user {telegram_id}")
+            logger.error(f"Failed to create/extend subscription (invoice: {invoice_id[:12]}...)")
             # Still send a notification to user
             send_telegram_message(
                 telegram_id,
@@ -408,36 +419,41 @@ def btcpay_webhook():
         # Send private channel invite via edge function (non-blocking)
         try:
             edge_function_url = f"{SUPABASE_URL}/functions/v1/deliver-invite"
-            edge_function_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY') or SUPABASE_KEY
+            edge_function_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
             
-            # Call edge function asynchronously (don't block webhook response)
-            def send_invite_async():
-                try:
-                    response = requests.post(
-                        edge_function_url,
-                        json={'invoiceId': invoice_id},
-                        headers={
-                            'Authorization': f'Bearer {edge_function_key}',
-                            'Content-Type': 'application/json'
-                        },
-                        timeout=10
-                    )
-                    if response.ok:
-                        logger.info(f"✅ Invite sent for invoice {invoice_id}")
-                    else:
-                        logger.warning(f"⚠️ Invite function returned {response.status_code}: {response.text}")
-                except Exception as e:
-                    logger.error(f"Error calling deliver-invite function: {e}")
-            
-            # Run in background thread (non-blocking)
-            invite_thread = threading.Thread(target=send_invite_async, daemon=True)
-            invite_thread.start()
+            # Security: Require service role key (don't fallback to anon key)
+            if not edge_function_key:
+                logger.warning("SUPABASE_SERVICE_ROLE_KEY not set - skipping invite delivery")
+                # Non-critical, continue without failing webhook - invite will be skipped
+            else:
+                # Call edge function asynchronously (don't block webhook response)
+                def send_invite_async():
+                    try:
+                        response = requests.post(
+                            edge_function_url,
+                            json={'invoiceId': invoice_id},
+                            headers={
+                                'Authorization': f'Bearer {edge_function_key}',
+                                'Content-Type': 'application/json'
+                            },
+                            timeout=10
+                        )
+                        if response.ok:
+                            logger.info(f"✅ Invite sent (invoice: {invoice_id[:12]}...)")
+                        else:
+                            logger.warning(f"⚠️ Invite function returned {response.status_code}")
+                    except Exception as e:
+                        logger.error(f"Error calling deliver-invite function: {str(e)[:100]}")
+                
+                # Run in background thread (non-blocking)
+                invite_thread = threading.Thread(target=send_invite_async, daemon=True)
+                invite_thread.start()
             
         except Exception as e:
-            logger.warning(f"Failed to trigger invite delivery: {e}")
+            logger.warning(f"Failed to trigger invite delivery: {str(e)[:100]}")
             # Non-critical error, don't fail the webhook
         
-        logger.info(f"✅ Webhook processed successfully: {invoice_id} for user {telegram_id}")
+        logger.info(f"✅ Webhook processed successfully (invoice: {invoice_id[:12]}...)")
         
         return jsonify({
             'status': 'success',
@@ -447,12 +463,15 @@ def btcpay_webhook():
         }), 200
         
     except Exception as e:
-        logger.error(f"Webhook processing error: {e}", exc_info=True)
+        # Security: Log full error internally but don't expose details to client
+        error_id = f"ERR_{int(datetime.now().timestamp())}"
+        logger.error(f"Webhook processing error [{error_id}]: {e}", exc_info=True)
         
-        # Don't expose internal errors
+        # Don't expose internal errors or stack traces
         return jsonify({
             'status': 'error',
-            'message': 'Internal server error'
+            'message': 'Internal server error',
+            'error_id': error_id  # For support reference only
         }), 500
 
 
@@ -466,12 +485,8 @@ def health():
         'status': 'ok',
         'timestamp': datetime.now().isoformat(),
         'service': 'telegram-subscription-bot',
-        'version': '2.1.0',
-        'security': {
-            'amount_verification': 'enabled',
-            'webhook_signature': 'enabled' if BTCPAY_WEBHOOK_SECRET else 'disabled',
-            'rate_limiting': 'enabled' if cache else 'fallback'
-        }
+        'version': '2.1.0'
+        # Security: Removed security configuration details from public endpoint
     }
     
     # Check Supabase connectivity
@@ -479,6 +494,7 @@ def health():
         result = supabase.table('users').select('id').limit(1).execute()
         health_status['database'] = 'connected'
     except Exception as e:
+        # Security: Don't expose error details in health check
         logger.error(f"Health check - Supabase error: {e}")
         health_status['database'] = 'error'
         health_status['status'] = 'degraded'
@@ -489,6 +505,7 @@ def health():
         response = requests.get(url, timeout=5)
         health_status['btcpay'] = 'connected' if response.ok else 'error'
     except Exception as e:
+        # Security: Don't expose error details in health check
         logger.error(f"Health check - BTCPay error: {e}")
         health_status['btcpay'] = 'error'
         health_status['status'] = 'degraded'
@@ -599,17 +616,15 @@ def main():
         'SUPABASE_KEY',
         'BTCPAY_URL',
         'BTCPAY_API_KEY',
-        'BTCPAY_STORE_ID'
+        'BTCPAY_STORE_ID',
+        'BTCPAY_WEBHOOK_SECRET'  # Security: Now required
     ]
     
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     if missing_vars:
         logger.critical(f"Missing required environment variables: {', '.join(missing_vars)}")
+        logger.critical("⚠️  BTCPAY_WEBHOOK_SECRET is now REQUIRED for security!")
         sys.exit(1)
-    
-    # Warn about optional security features
-    if not BTCPAY_WEBHOOK_SECRET:
-        logger.warning("⚠️  BTCPAY_WEBHOOK_SECRET not set - webhook verification disabled!")
     
     if not cache:
         logger.warning("⚠️  Redis not configured - rate limiting and caching will use fallbacks")
@@ -621,7 +636,7 @@ def main():
     logger.info(f"Subscription: ${SUBSCRIPTION_PRICE} + fee = ${TOTAL_SUBSCRIPTION_PRICE} for {SUBSCRIPTION_DAYS} days")
     logger.info(f"Security features:")
     logger.info(f"  - Amount verification: ✅ ENABLED (STRICT)")
-    logger.info(f"  - Webhook verification: {'✅ Enabled' if BTCPAY_WEBHOOK_SECRET else '❌ Disabled'}")
+    logger.info(f"  - Webhook verification: ✅ ENABLED (REQUIRED)")
     logger.info(f"  - Rate limiting: {'✅ Enabled' if cache else '⚠️  Fallback mode'}")
     logger.info(f"  - Input validation: ✅ Enabled")
     logger.info(f"  - Idempotency: ✅ Enabled")
