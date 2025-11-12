@@ -588,7 +588,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Priority support\n"
             f"• Automatic renewal reminders\n\n"
             f"🔒 <b>Secure payment via BTCPay Server</b>\n"
-            f"Your privacy is protected - no personal info required!",
+            f"Your privacy is protected!",
             reply_markup=reply_markup,
             parse_mode='HTML'
         )
@@ -638,11 +638,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<b>Monthly Plan:</b>\n"
             f"💵 ${TOTAL_SUBSCRIPTION_PRICE:.2f} for {SUBSCRIPTION_DAYS} days\n\n"
             f"✨ <b>What's included:</b>\n"
-            f"• Full access to premium picks\n"
-            f"• Daily predictions & analysis\n"
             f"• Priority support\n"
-            f"• Exclusive content\n"
-            f"• Money-back guarantee\n\n"
             f"Tap Subscribe to get started!",
             reply_markup=reply_markup,
             parse_mode='HTML'
@@ -665,7 +661,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⚡ <b>Instant Activation:</b>\n"
             f"Your subscription activates automatically within seconds of payment.\n\n"
             f"📱 <b>Access:</b>\n"
-            f"Once subscribed, you'll get access to all premium features!",
+            f"Once subscribed, you'll get access to all paid chat features!",
             reply_markup=reply_markup,
             parse_mode='HTML'
         )
@@ -680,8 +676,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🆘 <b>Support</b>\n\n"
             f"Need help? We're here for you!\n\n"
             f"📧 <b>Contact:</b>\n"
-            f"• Email: support@betterpickz.com\n"
-            f"• Telegram: @betterpickz_support\n\n"
+            f"• Email: betterpickz@proton.me\n"
+            f"• Telegram: @CyphyrX\n\n"
             f"⏰ <b>Response Time:</b>\n"
             f"We typically respond within 24 hours.\n\n"
             f"💡 <b>Quick Help:</b>\n"
