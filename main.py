@@ -73,12 +73,12 @@ def add_security_headers(response):
     return response
 
 # Rate limiting
+# FIX: Removed exempt_routes (caused TypeError in Flask-Limiter 3.x)
 limiter = Limiter(
-    app=app,
     key_func=get_remote_address,
+    app=app,
     default_limits=["200 per hour"],
-    storage_uri=os.getenv('REDIS_URL', 'memory://'),
-    exempt_routes=['/health']
+    storage_uri=os.getenv('REDIS_URL', 'memory://')
 )
 
 # Idempotency tracking (prevent duplicate webhook processing)
@@ -457,6 +457,7 @@ def btcpay_webhook():
 
 
 @app.route('/health', methods=['GET'])
+@limiter.exempt  # FIX: Correct way to exempt routes in Flask-Limiter 3.x
 def health():
     """
     Health check endpoint
