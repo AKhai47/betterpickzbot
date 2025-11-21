@@ -5,7 +5,8 @@ import os
 import hmac
 import hashlib
 import logging
-from datetime import datetime, timedelta
+# FIX: Added 'timezone' to imports for date math
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Optional, Dict, Any
 import asyncio
@@ -43,17 +44,13 @@ REDIS_URL = os.getenv('REDIS_URL', None)
 
 # STRICT PRICING: Force crash if variables are missing
 try:
-    # These lines will fail if the variable is not set in Render
     SUBSCRIPTION_PRICE = float(os.environ['SUBSCRIPTION_PRICE'])
     PROCESSING_FEE_PERCENT = float(os.environ['PROCESSING_FEE_PERCENT'])
-    
-    # Optional: You can keep this flexible or make it strict too
     SUBSCRIPTION_DAYS = int(os.getenv('SUBSCRIPTION_DAYS', '30'))
 
 except KeyError as e:
     error_msg = f"❌ CRITICAL: Missing environment variable in Render: {e}"
     logger.critical(error_msg)
-    # Stop the server to prevent accidental incorrect pricing
     raise RuntimeError(error_msg)
 except ValueError as e:
     error_msg = f"❌ CRITICAL: Pricing variables must be numbers. Error: {e}"
@@ -249,11 +246,12 @@ def get_or_create_user(telegram_id: int, username: str = None, first_name: str =
         if result.data:
             return result.data[0]
         
+        # FIX: Use UTC now
         new_user = {
             'telegram_id': telegram_id,
             'username': username,
             'first_name': first_name,
-            'created_at': datetime.now().isoformat()
+            'created_at': datetime.now(timezone.utc).isoformat()
         }
         
         result = supabase.table('users').insert(new_user).execute()
@@ -280,11 +278,12 @@ def get_active_subscription(telegram_id: int, use_cache: bool = True) -> Optiona
             return cached
     
     try:
+        # FIX: Use UTC now for comparison
         result = supabase.table('subscriptions')\
             .select('*')\
             .eq('user_id', telegram_id)\
             .eq('status', 'active')\
-            .gte('end_date', datetime.now().isoformat())\
+            .gte('end_date', datetime.now(timezone.utc).isoformat())\
             .order('end_date', desc=True)\
             .limit(1)\
             .execute()
@@ -324,7 +323,8 @@ async def create_btcpay_invoice(telegram_id: int, amount: float) -> Optional[Dic
                 'Content-Type': 'application/json'
             }
             
-            order_id = f'sub_{telegram_id}_{int(datetime.now().timestamp())}'
+            # FIX: Use UTC timestamp
+            order_id = f'sub_{telegram_id}_{int(datetime.now(timezone.utc).timestamp())}'
             
             payload = {
                 'amount': str(round(amount, 2)),
@@ -386,7 +386,7 @@ def save_payment(telegram_id: int, invoice_data: Dict) -> Optional[Dict]:
             'currency': sanitize_string(invoice_data.get('currency', 'USD'), 10),
             'status': 'pending',
             'invoice_url': sanitize_string(invoice_data['checkoutLink'], 500),
-            'created_at': datetime.now().isoformat()
+            'created_at': datetime.now(timezone.utc).isoformat()
         }
         
         result = supabase.table('payments').insert(payment).execute()
@@ -416,11 +416,17 @@ def create_or_extend_subscription(telegram_id: int, amount: float, invoice_id: s
             .limit(1)\
             .execute()
         
-        now = datetime.now()
+        # FIX: Use UTC now
+        now = datetime.now(timezone.utc)
         
         if result.data:
             subscription = result.data[0]
+            # This comes from DB, likely already aware
             current_end = datetime.fromisoformat(subscription['end_date'])
+            # Ensure current_end is aware if it wasn't
+            if current_end.tzinfo is None:
+                current_end = current_end.replace(tzinfo=timezone.utc)
+                
             new_end = max(current_end, now) + timedelta(days=SUBSCRIPTION_DAYS)
             
             update_result = supabase.table('subscriptions')\
@@ -474,7 +480,7 @@ def log_activity(user_id: int, action: str, details: Dict = None):
             'user_id': user_id,
             'action': sanitize_string(action, 50),
             'details': details or {},
-            'created_at': datetime.now().isoformat()
+            'created_at': datetime.now(timezone.utc).isoformat()
         }
         
         supabase.table('activity_logs').insert(activity).execute()
@@ -543,8 +549,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if subscription:
+        # FIX: Handle timezone awareness
         end_date = datetime.fromisoformat(subscription['end_date'])
-        days_left = (end_date - datetime.now()).days
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=timezone.utc)
+            
+        # FIX: Use UTC now
+        days_left = (end_date - datetime.now(timezone.utc)).days
         status_text = "✅ Active" if days_left > 0 else "❌ Expired"
         
         await update.message.reply_text(
@@ -610,8 +621,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         if subscription:
+            # FIX: Timezone aware comparison
             end_date = datetime.fromisoformat(subscription['end_date'])
-            days_left = (end_date - datetime.now()).days
+            if end_date.tzinfo is None:
+                end_date = end_date.replace(tzinfo=timezone.utc)
+                
+            days_left = (end_date - datetime.now(timezone.utc)).days
             status_emoji = "✅" if days_left > 7 else "⚠️"
             
             await query.edit_message_text(
@@ -725,8 +740,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             
             if subscription:
+                # FIX: Timezone awareness
                 end_date = datetime.fromisoformat(subscription['end_date'])
-                days_left = (end_date - datetime.now()).days
+                if end_date.tzinfo is None:
+                    end_date = end_date.replace(tzinfo=timezone.utc)
+                    
+                days_left = (end_date - datetime.now(timezone.utc)).days
                 status_text = "✅ Active" if days_left > 0 else "❌ Expired"
                 
                 await context.bot.send_message(
@@ -751,8 +770,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             # Normal text message, can edit
             if subscription:
+                # FIX: Timezone awareness
                 end_date = datetime.fromisoformat(subscription['end_date'])
-                days_left = (end_date - datetime.now()).days
+                if end_date.tzinfo is None:
+                    end_date = end_date.replace(tzinfo=timezone.utc)
+                    
+                days_left = (end_date - datetime.now(timezone.utc)).days
                 status_text = "✅ Active" if days_left > 0 else "❌ Expired"
                 
                 await query.edit_message_text(
