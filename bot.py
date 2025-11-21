@@ -1,9 +1,3 @@
-"""
-Secured Telegram Subscription Bot with BTCPay & Supabase
-Enhanced with security, validation, caching, and optimization
-Version: 2.2 - With Inline Menu Buttons
-"""
-
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -94,10 +88,7 @@ http_client = httpx.AsyncClient(
 )
 
 
-# ============================================================================
 # SECURITY UTILITIES
-# ============================================================================
-
 def sanitize_string(value: str, max_length: int = 255) -> str:
     """Sanitize string input to prevent injection attacks"""
     if not isinstance(value, str):
@@ -170,10 +161,7 @@ def rate_limit_check(user_id: int, action: str = "command") -> bool:
         return True
 
 
-# ============================================================================
 # CACHE UTILITIES
-# ============================================================================
-
 def get_cached_subscription(telegram_id: int) -> Optional[Dict]:
     """Get subscription from cache"""
     if not cache:
@@ -214,10 +202,7 @@ def invalidate_subscription_cache(telegram_id: int):
         logger.error(f"Cache invalidation error: {e}")
 
 
-# ============================================================================
 # DATABASE FUNCTIONS
-# ============================================================================
-
 def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None) -> Optional[Dict]:
     """Get user from database or create if doesn't exist"""
     if not validate_telegram_id(telegram_id):
@@ -496,10 +481,7 @@ def generate_qr_code(payment_url: str) -> Optional[BytesIO]:
         return None
 
 
-# ============================================================================
 # BOT COMMAND HANDLERS
-# ============================================================================
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command with inline menu"""
     user = update.effective_user
