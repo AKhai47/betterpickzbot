@@ -77,8 +77,7 @@ limiter = Limiter(
     app=app,
     key_func=get_remote_address,
     default_limits=["200 per hour"],
-    storage_uri=os.getenv('REDIS_URL', 'memory://'),
-    exempt_routes=['/health']
+    storage_uri=os.getenv('REDIS_URL', 'memory://')
 )
 
 # Idempotency tracking (prevent duplicate webhook processing)
@@ -463,6 +462,7 @@ def btcpay_webhook():
 
 
 @app.route('/health', methods=['GET'])
+@limiter.exempt
 def health():
     """
     Health check endpoint
