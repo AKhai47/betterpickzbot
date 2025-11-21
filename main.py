@@ -1,10 +1,3 @@
-"""
-Secured Combined Telegram Bot + Webhook Server
-Enhanced with security, validation, idempotency, and optimization
-Runs on Render.com
-VERSION 2.1 - Added strict payment amount verification
-"""
-
 import os
 import hmac
 import hashlib
@@ -191,10 +184,8 @@ def send_telegram_message(telegram_id: int, message: str, parse_mode: str = 'HTM
     
     return False
 
-# ============================================================================
-# WEBHOOK ENDPOINTS
-# ============================================================================
 
+# WEBHOOK ENDPOINTS
 @app.route('/webhook/btcpay', methods=['POST'])
 @limiter.limit("60 per minute")
 def btcpay_webhook():
@@ -273,10 +264,8 @@ def btcpay_webhook():
             logger.error(f"Invalid payment amount in payment record")
             abort(400, "Invalid amount")
         
-        # ========================================================================
-        # CRITICAL SECURITY CHECK: Verify amount meets subscription price
-        # This prevents underpayments from activating subscriptions
-        # ========================================================================
+    
+       # Verify amount meets subscription price
         if amount < TOTAL_SUBSCRIPTION_PRICE:
             logger.warning(
                 f"🚨 INSUFFICIENT PAYMENT BLOCKED: "
@@ -329,10 +318,7 @@ def btcpay_webhook():
                 'message': 'Payment amount is less than subscription price'
             }), 400
         
-        # ========================================================================
-        # Amount is sufficient - proceed with subscription activation
-        # ========================================================================
-        
+        # Amount is sufficient - proceed with subscription activation        
         logger.info(f"✅ Payment verified: ${amount:.2f} >= ${TOTAL_SUBSCRIPTION_PRICE:.2f} (invoice: {invoice_id[:12]}...)")
         
         # Mark webhook as processed
@@ -566,10 +552,7 @@ def internal_error(e):
     return jsonify({'error': 'Internal server error'}), 500
 
 
-# ============================================================================
 # APPLICATION LIFECYCLE
-# ============================================================================
-
 bot_thread = None
 flask_running = False
 
