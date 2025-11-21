@@ -18,7 +18,20 @@ from supabase import create_client, Client
 import qrcode
 from io import BytesIO
 
-# Configuration from environment variables
+# Logging with UTF-8 encoding
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('bot.log', encoding='utf-8')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# ==========================================
+# CONFIGURATION & STRICT PRICING
+# ==========================================
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
@@ -26,10 +39,26 @@ BTCPAY_URL = os.getenv('BTCPAY_URL')
 BTCPAY_API_KEY = os.getenv('BTCPAY_API_KEY')
 BTCPAY_STORE_ID = os.getenv('BTCPAY_STORE_ID')
 BTCPAY_WEBHOOK_SECRET = os.getenv('BTCPAY_WEBHOOK_SECRET')
-SUBSCRIPTION_PRICE = float(os.getenv('SUBSCRIPTION_PRICE', '10.00'))
-SUBSCRIPTION_DAYS = int(os.getenv('SUBSCRIPTION_DAYS', '30'))
 REDIS_URL = os.getenv('REDIS_URL', None)
-PROCESSING_FEE_PERCENT = float(os.getenv('PROCESSING_FEE_PERCENT', '5.0'))
+
+# STRICT PRICING: Force crash if variables are missing
+try:
+    # These lines will fail if the variable is not set in Render
+    SUBSCRIPTION_PRICE = float(os.environ['SUBSCRIPTION_PRICE'])
+    PROCESSING_FEE_PERCENT = float(os.environ['PROCESSING_FEE_PERCENT'])
+    
+    # Optional: You can keep this flexible or make it strict too
+    SUBSCRIPTION_DAYS = int(os.getenv('SUBSCRIPTION_DAYS', '30'))
+
+except KeyError as e:
+    error_msg = f"❌ CRITICAL: Missing environment variable in Render: {e}"
+    logger.critical(error_msg)
+    # Stop the server to prevent accidental incorrect pricing
+    raise RuntimeError(error_msg)
+except ValueError as e:
+    error_msg = f"❌ CRITICAL: Pricing variables must be numbers. Error: {e}"
+    logger.critical(error_msg)
+    raise RuntimeError(error_msg)
 
 # Calculate total price with fee included
 def calculate_total_price():
@@ -48,16 +77,9 @@ ALLOWED_CURRENCIES = ['USD', 'EUR']
 MIN_SUBSCRIPTION_PRICE = 1.0
 MAX_SUBSCRIPTION_PRICE = 10000.0
 
-# Logging with UTF-8 encoding
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('bot.log', encoding='utf-8')
-    ]
-)
-logger = logging.getLogger(__name__)
+# ==========================================
+# INITIALIZATION
+# ==========================================
 
 # Initialize Supabase
 try:
@@ -88,7 +110,9 @@ http_client = httpx.AsyncClient(
 )
 
 
+# ==========================================
 # SECURITY UTILITIES
+# ==========================================
 def sanitize_string(value: str, max_length: int = 255) -> str:
     """Sanitize string input to prevent injection attacks"""
     if not isinstance(value, str):
@@ -161,7 +185,9 @@ def rate_limit_check(user_id: int, action: str = "command") -> bool:
         return True
 
 
+# ==========================================
 # CACHE UTILITIES
+# ==========================================
 def get_cached_subscription(telegram_id: int) -> Optional[Dict]:
     """Get subscription from cache"""
     if not cache:
@@ -202,7 +228,9 @@ def invalidate_subscription_cache(telegram_id: int):
         logger.error(f"Cache invalidation error: {e}")
 
 
+# ==========================================
 # DATABASE FUNCTIONS
+# ==========================================
 def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None) -> Optional[Dict]:
     """Get user from database or create if doesn't exist"""
     if not validate_telegram_id(telegram_id):
@@ -481,7 +509,9 @@ def generate_qr_code(payment_url: str) -> Optional[BytesIO]:
         return None
 
 
+# ==========================================
 # BOT COMMAND HANDLERS
+# ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command with inline menu"""
     user = update.effective_user
@@ -545,11 +575,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user = query.from_user
     telegram_id = user.id
-    
-    # Skip rate limiting for better UX (already rate limited at command level)
-    # if not rate_limit_check(telegram_id, "button"):
-    #     await query.edit_message_text("⏱ Please slow down. Try again in a minute.")
-    #     return
     
     # Menu: Subscribe
     if query.data == 'menu_subscribe':
